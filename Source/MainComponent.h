@@ -8,10 +8,12 @@
 #pragma once
 
 #include "../JuceLibraryCode/JuceHeader.h"
-#define POLYPHONY 16
+#define POLYPHONY 4
+#define CHANNELS 2
 
 //global qVal, so SynthVoice can access and Slider in MainComponent can update
 static double qVal = 0.0;
+
 
 
 //==============================================================================
@@ -29,7 +31,8 @@ struct SynthVoice   : public SynthesiserVoice
 
 {
 public:
-    SynthVoice();
+    //SynthVoice();
+    SynthVoice( int samplesPerBlockExpected );
     
     bool canPlaySound (SynthesiserSound* sound) override;
     void startNote (int midiNoteNumber, float velocity,
@@ -44,8 +47,10 @@ private:
     double lastSample[2];
     bool isOn = false;
     Random random;
+    //std::vector<IIRFilter> bandPassFilters;
     IIRFilter bandPassFilter;
-
+    int samplesPerBlock;
+    AudioSampleBuffer bufferBuffer;
 };
 
 //==============================================================================
@@ -54,7 +59,7 @@ class SynthAudioSource   : public AudioSource
 public:
     SynthAudioSource (MidiKeyboardState& keyState);
     
-    void prepareToPlay (int /*samplesPerBlockExpected*/, double sampleRate) override;
+    void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
     void releaseResources() override;
     void getNextAudioBlock (const AudioSourceChannelInfo& bufferToFill) override;
     
@@ -67,7 +72,10 @@ private:
 //==============================================================================
 class MainComponent   : public AudioAppComponent,
                         public Slider::Listener,
-                        private Timer
+                        private Timer,
+                        private ComboBox::Listener,
+                        private MidiInputCallback,
+                        private MidiKeyboardStateListener
 {
 public:
     
@@ -80,6 +88,19 @@ public:
     void sliderValueChanged (Slider* slider) override;
     void paint (Graphics& g) override;
     void resized() override;
+    void setMidiInput (int index);
+    void handleIncomingMidiMessage (MidiInput* source, const MidiMessage& message) override;
+    void handleNoteOn (MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) override;
+    void handleNoteOff (MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) override;
+    void comboBoxChanged (ComboBox* box) override;
+    void addMessageToBuffer (const MidiMessage& message);
+    
+    ComboBox midiInputList;
+    AudioDeviceManager deviceManager;
+    int lastInputIndex = 0;
+    bool isAddingFromMidiInput = false;
+    
+
 
 private:
     void timerCallback() override;
@@ -89,6 +110,11 @@ private:
     SynthAudioSource synthAudioSource;
     float volume;
     Slider qValSlider;
+    Label qValLabel;
+    Label volumeLabel;
+    Label midiInputListLabel;
+
+
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
