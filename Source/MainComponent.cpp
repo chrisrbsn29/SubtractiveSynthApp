@@ -23,14 +23,14 @@ bool SynthSound::appliesToChannel( int ) { return true; }
 SynthVoice::SynthVoice( int samplesPerBlockExpected )
     : bandPassFilter(), bufferBuffer(CHANNELS, samplesPerBlockExpected)
     {
-        
+        spec.sampleRate = getSampleRate();
+        spec.maximumBlockSize = samplesPerBlockExpected;
+        spec.numChannels = CHANNELS;
         samplesPerBlock = samplesPerBlockExpected;
+        dsp::AudioBlock<float> block;
         
-        /*auto i = 0;
-        while( i < CHANNELS ){
-            bandPassFilters.push_back( IIRFilter());
-            i++;
-        }*/
+
+    
     }
 
 
@@ -41,6 +41,10 @@ bool SynthVoice::canPlaySound (SynthesiserSound* sound){
 void SynthVoice::startNote (int midiNoteNumber, float velocity,
                             SynthesiserSound*, int /*currentPitchWheelPosition*/) {
     
+    stateVariableFilter.reset();
+    stateVariableFilter.prepare(spec);
+    stateVariableFilter.state->type = dsp::StateVariableFilter::Parameters<float>::Type::bandPass;
+    
     tailOff = 0.0;
     attack = 0.0;
     level = velocity * 0.5;
@@ -49,7 +53,11 @@ void SynthVoice::startNote (int midiNoteNumber, float velocity,
     double frequency = MidiMessage::getMidiNoteInHertz (midiNoteNumber);
     //for( int i = 0; i < CHANNELS; i++)
         //bandPassFilters[i].setCoefficients(IIRCoefficients::makeBandPass (getSampleRate(), frequency, qVal));
-    bandPassFilter.setCoefficients(IIRCoefficients::makeBandPass (getSampleRate(), frequency, qVal));
+    if (qVal <= 0) qVal = 0.0001;
+    //bandPassFilter.setCoefficients(IIRCoefficients::makeBandPass (getSampleRate(), frequency, qVal));
+    
+    const double cyclesPerSample = frequency / getSampleRate(); // this is only for sine, delete after
+    angleDelta = cyclesPerSample * 2.0 * double_Pi;
 
     
 }
@@ -64,16 +72,22 @@ void SynthVoice::stopNote (float /*velocity*/, bool allowTailOff){
     {
         clearCurrentNote();
         isOn = false;
+        stateVariableFilter.reset();
         //for( int i = 0; i < CHANNELS; i++)
             //bandPassFilters[i].makeInactive();
-        bandPassFilter.makeInactive();
+        //bandPassFilter.makeInactive();
     }
 }
 void SynthVoice::pitchWheelMoved (int){}
 void SynthVoice::controllerMoved (int, int){}
+void SynthVoice::updateFilter(){
+    stateVariableFilter.state->setCutOffFrequency(getSampleRate(), qVal, static_cast<float> (1.0 / MathConstants<double>::sqrt2));
+}
 void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSample, int numSamples)
 {
     // New Version
+    
+    //block = AudioBlock(outputBuffer);
     
     if( isOn )
     {
@@ -82,12 +96,18 @@ void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSamp
         {
             while (--index >= 0)
             {
-                //if( attack < 1.0 ) attack += 0.01;
-                auto currentSample = (float) random.nextFloat() * 0.5f - 0.25f * level * tailOff;
+                //TODO this is where you changed noise to sine (1/2)
+                //auto currentSample = (float) random.nextFloat() * 0.5f - 0.25f * level * tailOff;
+                auto currentSample = (float) std::sin (currentAngle) * level * tailOff;
+                currentAngle += angleDelta;
                 
-                for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){
+                //for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){ UNCOMMENT
+                int32 check = outputBuffer.getNumChannels();
+                int32 check2 = bufferBuffer.getNumChannels();
+                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
 
-                    bufferBuffer.addSample (i, startSample, currentSample);
+                    //bufferBuffer.addSample (i, startSample, currentSample); UNCOMMENT
+                    outputBuffer.addSample(i, startSample, currentSample);//delete
                 }
                 ++startSample;
             
@@ -102,37 +122,52 @@ void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSamp
                 }
             }
         }
-        else // without tail off
+        else // without tail off (tail on)
         {
             while (--index >= 0)
             {
-                //if( attack < 1.0 ) attack += 0.01;
-                auto currentSample = (float) random.nextFloat() - 0.5f * level;
+                //TODO only for sine, revert (2/2)
+                //auto currentSample = (float) random.nextFloat() - 0.5f * level;
+                auto currentSample = (float) std::sin (currentAngle) * level;
+                currentAngle += angleDelta;
             
-                for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){
+                //for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){  UNCOMMENT
 
-                    bufferBuffer.addSample (i, startSample, currentSample);
+                    //bufferBuffer.addSample (i, startSample, currentSample); UNCOMMENT
+                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
+                    outputBuffer.addSample(i, startSample, currentSample);//delete
 
                 }
                 ++startSample;
             }
         }
         //bandpass filter bufferBuffer
-        for (auto i = bufferBuffer.getNumChannels(); --i >= 0;)
+       // for (auto i = bufferBuffer.getNumChannels(); --i >= 0;) UNCOMMENT
             //bandPassFilters[i].processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(bufferBuffer.getWritePointer(i), bufferBuffer.getNumSamples());
+           // bandPassFilter.processSamples(bufferBuffer.getWritePointer(i), bufferBuffer.getNumSamples()); UNCOMMENT
+        
+        for (auto i = outputBuffer.getNumChannels(); --i >= 0;){ //DELETE WHOLE BLOCK
+        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
+        }
         
         //add to og buffer
-        while (--numSamples >= 0){
+        /*while (--numSamples >= 0){ UNCOMMENT
             for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
                 outputBuffer.addSample (i, numSamples, bufferBuffer.getSample(i, numSamples));
             }
-        }
+        }*/
         
     }// new version ends here
     
 
-        
      /*
     // Old Version (only here in case I break everything)
     if( isOn )
@@ -317,7 +352,8 @@ void MainComponent::getNextAudioBlock (const AudioSourceChannelInfo& bufferToFil
             
             //multiply by qVal because it gets hella quiet otherwise
             
-            buffer[sample] = buffer[sample] * volume * qVal;
+            //buffer[sample] = buffer[sample] * volume * qVal; qval or no?
+            buffer[sample] = buffer[sample] * volume;
             if( buffer[sample] > 1.0f ) buffer[sample] = 1.0f;
             if( buffer[sample] < -1.0f ) buffer[sample] = -1.0f;
 

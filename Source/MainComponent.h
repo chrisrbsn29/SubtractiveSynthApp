@@ -14,6 +14,8 @@
 //global qVal, so SynthVoice can access and Slider in MainComponent can update
 static double qVal = 0.0;
 
+//==============================================================================
+
 
 
 //==============================================================================
@@ -41,14 +43,22 @@ public:
     void pitchWheelMoved (int) override;
     void controllerMoved (int, int) override;
     void renderNextBlock (AudioSampleBuffer& outputBuffer, int startSample, int numSamples) override;
+    void updateFilter();
+    
+    dsp::ProcessSpec spec;
     
 private:
     double level = 0.0, tailOff = 0.0, attack = 0.0;
     double lastSample[2];
     bool isOn = false;
     Random random;
+    double angleDelta;//delete
+    double currentAngle = 0.0;
+    
     //std::vector<IIRFilter> bandPassFilters;
-    IIRFilter bandPassFilter;
+    //IIRFilter bandPassFilter;
+    juce::dsp::StateVariableFilter::Filter<float> bandPassFilter;
+    juce::dsp::ProcessorDuplicator<dsp::StateVariableFilter::Filter<float>, dsp::StateVariableFilter::Parameters<float>> stateVariableFilter;
     int samplesPerBlock;
     AudioSampleBuffer bufferBuffer;
 };

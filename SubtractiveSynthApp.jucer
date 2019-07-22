@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="SBoZS1" name="SubtractiveSynthApp" projectType="guiapp" jucerVersion="5.4.1">
+<JUCERPROJECT id="SBoZS1" name="SubtractiveSynthApp" projectType="guiapp" jucerVersion="5.4.3">
   <MAINGROUP id="McB3ff" name="SubtractiveSynthApp">
     <GROUP id="{0C4F5433-0586-1F88-6371-2A650C2FCD13}" name="Source">
       <FILE id="ojmbxD" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
@@ -30,6 +30,7 @@
         <MODULEPATH id="juce_gui_extra" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_opengl" path="../../JUCE/modules"/>
         <MODULEPATH id="juce_video" path="../../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../../JUCE/modules"/>
       </MODULEPATHS>
     </XCODE_MAC>
   </EXPORTFORMATS>
@@ -42,6 +43,7 @@
     <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_cryptography" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
