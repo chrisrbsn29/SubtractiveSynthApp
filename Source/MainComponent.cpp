@@ -21,7 +21,7 @@ bool SynthSound::appliesToChannel( int ) { return true; }
 
 //==============================================================================
 SynthVoice::SynthVoice( int samplesPerBlockExpected )
-    : bandPassFilter(), bufferBuffer(CHANNELS, samplesPerBlockExpected)
+    :bpFilter(dsp::IIR::Coefficients<float>::makeBandPass (getSampleRate(), 20000.0f, 0.0001f))
     {
         spec.sampleRate = getSampleRate();
         spec.maximumBlockSize = samplesPerBlockExpected;
@@ -33,6 +33,12 @@ SynthVoice::SynthVoice( int samplesPerBlockExpected )
     
     }
 
+void SynthVoice::timerCallback()
+{
+    if( attack < 1.0f ) attack += 0.01f;
+
+}
+
 
 bool SynthVoice::canPlaySound (SynthesiserSound* sound){
         return dynamic_cast<SynthSound*> (sound) != nullptr;
@@ -41,24 +47,19 @@ bool SynthVoice::canPlaySound (SynthesiserSound* sound){
 void SynthVoice::startNote (int midiNoteNumber, float velocity,
                             SynthesiserSound*, int /*currentPitchWheelPosition*/) {
     
-    stateVariableFilter.reset();
-    stateVariableFilter.prepare(spec);
-    stateVariableFilter.state->type = dsp::StateVariableFilter::Parameters<float>::Type::bandPass;
+    bpFilter.reset();
     
     tailOff = 0.0;
     attack = 0.0;
-    level = velocity * 0.5;
+    startTimer(1);
+    //level = velocity * 0.5;
+    level = 0.5;
     isOn = true;
     
-    double frequency = MidiMessage::getMidiNoteInHertz (midiNoteNumber);
-    //for( int i = 0; i < CHANNELS; i++)
-        //bandPassFilters[i].setCoefficients(IIRCoefficients::makeBandPass (getSampleRate(), frequency, qVal));
-    if (qVal <= 0) qVal = 0.0001;
-    //bandPassFilter.setCoefficients(IIRCoefficients::makeBandPass (getSampleRate(), frequency, qVal));
+    frequency = MidiMessage::getMidiNoteInHertz (midiNoteNumber);
     
-    const double cyclesPerSample = frequency / getSampleRate(); // this is only for sine, delete after
-    angleDelta = cyclesPerSample * 2.0 * double_Pi;
-
+    updateFilter();
+    bpFilter.prepare(spec);
     
 }
 void SynthVoice::stopNote (float /*velocity*/, bool allowTailOff){
@@ -72,22 +73,24 @@ void SynthVoice::stopNote (float /*velocity*/, bool allowTailOff){
     {
         clearCurrentNote();
         isOn = false;
-        stateVariableFilter.reset();
-        //for( int i = 0; i < CHANNELS; i++)
-            //bandPassFilters[i].makeInactive();
-        //bandPassFilter.makeInactive();
+        stopTimer();
+        bpFilter.reset();
     }
 }
 void SynthVoice::pitchWheelMoved (int){}
 void SynthVoice::controllerMoved (int, int){}
+
 void SynthVoice::updateFilter(){
-    stateVariableFilter.state->setCutOffFrequency(getSampleRate(), qVal, static_cast<float> (1.0 / MathConstants<double>::sqrt2));
+
+    if( qVal <= 0) qVal = 0.0001;
+    
+    *bpFilter.state = *dsp::IIR::Coefficients<float>::makeBandPass (getSampleRate(), frequency, qVal);
+
 }
 void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSample, int numSamples)
 {
-    // New Version
-    
-    //block = AudioBlock(outputBuffer);
+    bufferBuffer = AudioBuffer<float>( outputBuffer.getNumChannels(), outputBuffer.getNumSamples());
+    bufferBuffer.clear();
     
     if( isOn )
     {
@@ -96,28 +99,23 @@ void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSamp
         {
             while (--index >= 0)
             {
-                //TODO this is where you changed noise to sine (1/2)
-                //auto currentSample = (float) random.nextFloat() * 0.5f - 0.25f * level * tailOff;
-                auto currentSample = (float) std::sin (currentAngle) * level * tailOff;
-                currentAngle += angleDelta;
+  
+                auto currentSample = level * tailOff * attack * (-0.25f + (0.5f * (float) random.nextFloat()));
                 
-                //for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){ UNCOMMENT
-                int32 check = outputBuffer.getNumChannels();
-                int32 check2 = bufferBuffer.getNumChannels();
-                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
+                for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){
 
-                    //bufferBuffer.addSample (i, startSample, currentSample); UNCOMMENT
-                    outputBuffer.addSample(i, startSample, currentSample);//delete
+                    bufferBuffer.addSample(i, startSample, currentSample);
                 }
                 ++startSample;
             
-                tailOff *= 0.99;
+                tailOff *= 0.994;
             
                 if (tailOff <= 0.005)
                 {
                     clearCurrentNote();
                     isOn = false;
-                    bandPassFilter.makeInactive();
+                    stopTimer();
+                    bpFilter.reset();
                     break;
                 }
             }
@@ -126,111 +124,35 @@ void SynthVoice::renderNextBlock (AudioSampleBuffer& outputBuffer, int startSamp
         {
             while (--index >= 0)
             {
-                //TODO only for sine, revert (2/2)
-                //auto currentSample = (float) random.nextFloat() - 0.5f * level;
-                auto currentSample = (float) std::sin (currentAngle) * level;
-                currentAngle += angleDelta;
-            
-                //for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){  UNCOMMENT
-
-                    //bufferBuffer.addSample (i, startSample, currentSample); UNCOMMENT
-                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
-                    outputBuffer.addSample(i, startSample, currentSample);//delete
+                
+                auto currentSample = level * attack * (-0.25f + (0.5f * (float) random.nextFloat()));
+                
+                for (auto i = bufferBuffer.getNumChannels(); --i >= 0;){
+                    bufferBuffer.addSample(i, startSample, currentSample);
 
                 }
                 ++startSample;
             }
         }
-        //bandpass filter bufferBuffer
-       // for (auto i = bufferBuffer.getNumChannels(); --i >= 0;) UNCOMMENT
-            //bandPassFilters[i].processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-           // bandPassFilter.processSamples(bufferBuffer.getWritePointer(i), bufferBuffer.getNumSamples()); UNCOMMENT
+        dsp::AudioBlock<float> block(bufferBuffer);
+        updateFilter();
+        bpFilter.process(dsp::ProcessContextReplacing<float> (block));
+        index = numSamples;
+        while (--index >= 0){
+            for( auto i = outputBuffer.getNumChannels(); --i >= 0;){
         
-        for (auto i = outputBuffer.getNumChannels(); --i >= 0;){ //DELETE WHOLE BLOCK
-        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-        bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-        }
-        
-        //add to og buffer
-        /*while (--numSamples >= 0){ UNCOMMENT
-            for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
-                outputBuffer.addSample (i, numSamples, bufferBuffer.getSample(i, numSamples));
-            }
-        }*/
-        
-    }// new version ends here
-    
-
-     /*
-    // Old Version (only here in case I break everything)
-    if( isOn )
-    {
-        int index = numSamples;
-        if (tailOff > 0.0) // with tail off
-        {
-            while (--index >= 0)
-            {
-                //if( attack < 1.0 ) attack += 0.01;
-                auto currentSample = (float) random.nextFloat() * 0.5f - 0.25f * level * tailOff;
-                
-                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
-                    //if ( index == 0 ) currentSample = lastSample[i];
-                    //if ( index ==  numSamples - 1 ) lastSample[i] = currentSample;
-                    outputBuffer.addSample (i, startSample, currentSample);
-                }
-                ++startSample;
-                
-                tailOff *= 0.99;
-                
-                if (tailOff <= 0.005)
-                {
-                    clearCurrentNote();
-                    isOn = false;
-                    bandPassFilter.makeInactive();
-                    break;
-                }
+                //bufferBuffer.setSample(i, index, bufferBuffer.getSample(i, index) * static_cast<float> (MathConstants<double>::sqrt2));
+                bufferBuffer.setSample(i, index, bufferBuffer.getSample(i, index) * (1 + qVal));
+                outputBuffer.addSample(i, index, bufferBuffer.getSample(i, index));
             }
         }
-        else // without tail off
-        {
-            while (--index >= 0)
-            {
-                //if( attack < 1.0 ) attack += 0.01;
-                auto currentSample = (float) random.nextFloat() - 0.5f * level;
-                
-                for (auto i = outputBuffer.getNumChannels(); --i >= 0;){
-                    //if ( index == 0 ) currentSample = lastSample[i];
-                    //if ( index ==  numSamples - 1 ) lastSample[i] = currentSample;
-                    outputBuffer.addSample (i, startSample, currentSample);
-                }
-                ++startSample;
-            }
-        }
-        //bandpass filter all of the samples
-        for (auto i = outputBuffer.getNumChannels(); --i >= 0;)
-            //bandPassFilters[i].processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-            bandPassFilter.processSamples(outputBuffer.getWritePointer(i), outputBuffer.getNumSamples());
-    } //old version ends here*/
-    
+    }
 }
 
 
 //==============================================================================
 SynthAudioSource::SynthAudioSource (MidiKeyboardState& keyState)
-    : keyboardState (keyState)
-    {
-        /*for (auto i = 0; i < POLYPHONY; ++i)
-            synth.addVoice (new SynthVoice( samplesPerBlockExpected ));
-        
-        synth.addSound (new SynthSound());*/
-    }
+    : keyboardState (keyState){}
     
     void SynthAudioSource::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
     {
@@ -239,22 +161,29 @@ SynthAudioSource::SynthAudioSource (MidiKeyboardState& keyState)
         
         synth.addSound (new SynthSound());
         synth.setCurrentPlaybackSampleRate (sampleRate);
+        midiCollector.reset (sampleRate);
     }
     
     void SynthAudioSource::releaseResources(){}
     
     void SynthAudioSource::getNextAudioBlock (const AudioSourceChannelInfo& bufferToFill)
     {
-       
-        MidiBuffer incomingMidi;
-        keyboardState.processNextMidiBuffer (incomingMidi, bufferToFill.startSample,
+        bufferToFill.clearActiveBufferRegion();
+
+            MidiBuffer incomingMidi;
+            midiCollector.removeNextBlockOfMessages (incomingMidi, bufferToFill.numSamples);
+            keyboardState.processNextMidiBuffer (incomingMidi, bufferToFill.startSample,
                                              bufferToFill.numSamples, true);
-        
-        synth.renderNextBlock (*bufferToFill.buffer, incomingMidi,
+
+            synth.renderNextBlock (*bufferToFill.buffer, incomingMidi,
                                bufferToFill.startSample, bufferToFill.numSamples);
+
         
-        
-        
+    }
+
+    MidiMessageCollector* SynthAudioSource::getMidiCollector()
+    {
+        return &midiCollector;
     }
 
 
@@ -263,7 +192,8 @@ MainComponent::MainComponent()  :
 
     keyboardComponent(keyboardState, MidiKeyboardComponent::horizontalKeyboard),
     synthAudioSource(keyboardState),
-    volume(0.0)
+    volume(0.0),
+    previousSampleNumber(0)
 
 
 {
@@ -311,14 +241,14 @@ MainComponent::MainComponent()  :
     volumeSlider.addListener (this);
 
     addAndMakeVisible(qValSlider);
-    qValSlider.setRange (0.0, 1000.0);
+    qValSlider.setRange (0.0001, 10.0);
     //qValSlider.setSkewFactorFromMidPoint (64.0);
     qValSlider.addListener (this);
     
     addAndMakeVisible(keyboardComponent);
     keyboardState.addListener (this);
 
-    startTimer (400);
+    //startTimer (400);
     
     // specify the number of input and output channels that we want to open
     setAudioChannels (0, CHANNELS); 
@@ -334,6 +264,8 @@ MainComponent::~MainComponent()
 //==============================================================================
 void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
 {
+    startTimer (1);
+    prevSampleRate = sampleRate;
     synthAudioSource.prepareToPlay (samplesPerBlockExpected, sampleRate);
 }
 
@@ -350,10 +282,9 @@ void MainComponent::getNextAudioBlock (const AudioSourceChannelInfo& bufferToFil
         
         for (auto sample = 0; sample < bufferToFill.numSamples; ++sample){
             
-            //multiply by qVal because it gets hella quiet otherwise
-            
-            //buffer[sample] = buffer[sample] * volume * qVal; qval or no?
+            //qVal or not?
             buffer[sample] = buffer[sample] * volume;
+            //buffer[sample] = buffer[sample] * volume / (1.0f + pow(qValSlider.getValue(),1.2));
             if( buffer[sample] > 1.0f ) buffer[sample] = 1.0f;
             if( buffer[sample] < -1.0f ) buffer[sample] = -1.0f;
 
@@ -368,7 +299,8 @@ void MainComponent::releaseResources()
 }
 void MainComponent::sliderValueChanged(Slider *slider){
     if( slider == &qValSlider ){
-        qVal = slider->getValue();
+        qVal = pow(2, slider->getValue());
+        //qVal = slider->getValue();
     }
     else if(slider == &volumeSlider){
         volume = slider->getValue();
@@ -377,19 +309,42 @@ void MainComponent::sliderValueChanged(Slider *slider){
 
 void MainComponent::timerCallback()
 {
-    keyboardComponent.grabKeyboardFocus();
-    stopTimer();
+    
+ 
+    auto currentTime = Time::getMillisecondCounterHiRes() * 0.001 - startTime;
+    auto currentSampleNumber = (int) (currentTime * prevSampleRate);
+    
+    MidiBuffer::Iterator iterator (midiBuffer);
+    MidiMessage message;
+    int sampleNumber;
+    
+    while (iterator.getNextEvent (message, sampleNumber))
+    {
+        if (sampleNumber > currentSampleNumber)
+            break;
+        
+       // message.setTimeStamp (sampleNumber / prevSampleRate);
+
+    }
+    
+
+    midiBuffer.clear (previousSampleNumber, currentSampleNumber - previousSampleNumber); 
+    previousSampleNumber = currentSampleNumber;
 }
 
 void MainComponent::setMidiInput (int index)
 {
     auto list = MidiInput::getDevices();
     deviceManager.removeMidiInputCallback (list[lastInputIndex], this);
+    
     auto newInput = list[index];
+    
     if (! deviceManager.isMidiInputEnabled (newInput))
         deviceManager.setMidiInputEnabled (newInput, true);
-    deviceManager.addMidiInputCallback (newInput, this);
+    
+    deviceManager.addMidiInputCallback (newInput, synthAudioSource.getMidiCollector());
     midiInputList.setSelectedId (index + 1, dontSendNotification);
+    
     lastInputIndex = index;
 }
 
@@ -404,9 +359,9 @@ void MainComponent::handleNoteOn (MidiKeyboardState*, int midiChannel, int midiN
 {
     if (! isAddingFromMidiInput)
     {
-        //MidiMessage m (MidiMessage::noteOn (midiChannel, midiNoteNumber, velocity));
-        //m.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
-        //addMessageToBuffer (m);
+        MidiMessage m (MidiMessage::noteOn (midiChannel, midiNoteNumber, 1.0f));
+        m.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
+        addMessageToBuffer (m);
     }
 }
 
@@ -414,9 +369,9 @@ void MainComponent::handleNoteOff (MidiKeyboardState*, int midiChannel, int midi
 {
     if (! isAddingFromMidiInput)
     {
-        //MidiMessage m (MidiMessage::noteOn (midiChannel, midiNoteNumber, velocity));
-        //m.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
-        //addMessageToBuffer (m);
+        MidiMessage m (MidiMessage::noteOff (midiChannel, midiNoteNumber, 1.0f));
+        m.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
+        addMessageToBuffer (m);
     }
 }
 
@@ -428,9 +383,9 @@ void MainComponent::comboBoxChanged (ComboBox* box)
 
 void MainComponent::addMessageToBuffer (const MidiMessage& message)
 {
-    //auto timestamp = message.getTimeStamp();
-    //auto sampleNumber =  (int) (timestamp * 44100.0);  //todo: fix sample rate magic num
-    //midiBuffer.addEvent (message, sampleNumber);
+    auto timestamp = message.getTimeStamp();
+    auto sampleNumber =  (int) (timestamp * prevSampleRate);
+    midiBuffer.addEvent (message, sampleNumber);
 }
 
 //==============================================================================
